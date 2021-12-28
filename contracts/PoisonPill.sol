@@ -186,11 +186,11 @@ contract PoisonPill is Auth, Trust {
             // TODO: Make use of USDC price oracle
             // https://data.chain.link/ethereum/mainnet/stablecoins/usdc-usd
             uint8 stableDecimals = 6;
-            uint256 tokenAmount = amount * 1e8 / oraclePrice;
+            uint256 tokenAmount = amount * (10 ** oracleDecimals) / oraclePrice;
             if (tokenDecimals > stableDecimals) {
-                tokenAmount *= 1e12;
+                tokenAmount *= (10 ** (tokenDecimals - stableDecimals));
             } else if (tokenDecimals < stableDecimals) {
-                tokenAmount /= (2 << (stableDecimals - tokenDecimals));
+                tokenAmount /= (10 ** (stableDecimals - tokenDecimals));
             }
             IERC20(USDC).transferFrom(msg.sender, address(this), amount);
             IERC20(token).transfer(msg.sender, tokenAmount);
