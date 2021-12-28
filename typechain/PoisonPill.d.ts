@@ -207,7 +207,7 @@ export class PoisonPill extends BaseContract {
     price(overrides?: CallOverrides): Promise<[BigNumber]>;
 
     redeem(
-      tokenAmount: BigNumberish,
+      amount: BigNumberish,
       isUSDC: boolean,
       overrides?: Overrides & { from?: string | Promise<string> }
     ): Promise<ContractTransaction>;
@@ -267,7 +267,7 @@ export class PoisonPill extends BaseContract {
   price(overrides?: CallOverrides): Promise<BigNumber>;
 
   redeem(
-    tokenAmount: BigNumberish,
+    amount: BigNumberish,
     isUSDC: boolean,
     overrides?: Overrides & { from?: string | Promise<string> }
   ): Promise<ContractTransaction>;
@@ -327,7 +327,7 @@ export class PoisonPill extends BaseContract {
     price(overrides?: CallOverrides): Promise<BigNumber>;
 
     redeem(
-      tokenAmount: BigNumberish,
+      amount: BigNumberish,
       isUSDC: boolean,
       overrides?: CallOverrides
     ): Promise<void>;
@@ -424,7 +424,7 @@ export class PoisonPill extends BaseContract {
     price(overrides?: CallOverrides): Promise<BigNumber>;
 
     redeem(
-      tokenAmount: BigNumberish,
+      amount: BigNumberish,
       isUSDC: boolean,
       overrides?: Overrides & { from?: string | Promise<string> }
     ): Promise<BigNumber>;
@@ -490,7 +490,7 @@ export class PoisonPill extends BaseContract {
     price(overrides?: CallOverrides): Promise<PopulatedTransaction>;
 
     redeem(
-      tokenAmount: BigNumberish,
+      amount: BigNumberish,
       isUSDC: boolean,
       overrides?: Overrides & { from?: string | Promise<string> }
     ): Promise<PopulatedTransaction>;

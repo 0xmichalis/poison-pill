@@ -37,6 +37,7 @@ describe("PoisonPill", function () {
   const tokenDecimals = 18;
   const usdcDecimals = 6;
   const wethDecimals = 18;
+  const treasuryTokenBalance = parseUnits("1000000", tokenDecimals);
 
   let usdc: USDC;
   let weth: WETH;
@@ -55,7 +56,7 @@ describe("PoisonPill", function () {
 
       wethOracle = await (
         await getFactory<TestPriceOracle__factory>("TestPriceOracle")
-      ).deploy(4100, oracleDecimals);
+      ).deploy(parseUnits("3900", oracleDecimals), oracleDecimals);
       await wethOracle.deployed();
 
       token = await (
@@ -65,12 +66,11 @@ describe("PoisonPill", function () {
 
       tokenOracle = await (
         await getFactory<TestPriceOracle__factory>("TestPriceOracle")
-      ).deploy(100, oracleDecimals);
+      ).deploy(parseUnits("100", oracleDecimals), oracleDecimals);
       await tokenOracle.deployed();
     });
 
     it("should properly prime user balances", async function () {
-      const treasuryTokenBalance = parseUnits("1000000", tokenDecimals);
       await token
         .connect(deployer)
         .mint(treasury.address, treasuryTokenBalance);
@@ -108,9 +108,31 @@ describe("PoisonPill", function () {
         treasury.address,
         [trustedUser1.address, trustedUser2.address],
         0,
+        0,
         1000
       );
       await poisonPill.deployed();
+    });
+
+    it("should transfer treasury funds to poison pill", async function () {
+      await token
+        .connect(treasury)
+        .transfer(poisonPill.address, treasuryTokenBalance);
+      expect(await token.balanceOf(poisonPill.address)).to.equal(
+        treasuryTokenBalance
+      );
+    });
+
+    it("should allow trusted user to take the pill", async function () {
+      // 200 USDC
+      const usdcBalance = parseUnits("2000", usdcDecimals);
+      // Oracle price is 100 so the user should get 20 TestTokens
+      const tokenBalance = parseUnits("20", tokenDecimals);
+      await usdc.connect(trustedUser1).approve(poisonPill.address, usdcBalance);
+      await poisonPill.connect(trustedUser1).redeem(usdcBalance, true);
+      expect(await token.balanceOf(trustedUser1.address)).to.equal(
+        tokenBalance
+      );
     });
   });
 });

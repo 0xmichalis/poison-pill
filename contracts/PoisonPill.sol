@@ -76,6 +76,7 @@ contract PoisonPill is Auth, Trust {
         address _treasury,
         address[] memory _users,
         uint256 _price,
+        uint8 _priceDecimals,
         uint16 _discountBasisPoints
     ) payable Auth(msg.sender, Authority(msg.sender)) Trust(address(0)) {
         require(_usdc != address(0), "!_usdc");
@@ -103,6 +104,7 @@ contract PoisonPill is Auth, Trust {
             tokenOracleDecimals = IPriceOracle(tokenOracle).decimals();
         } else {
             price = _price;
+            tokenOracleDecimals = _priceDecimals;
             emit PriceUpdated(_price);
         }
         unchecked {
@@ -159,29 +161,39 @@ contract PoisonPill is Auth, Trust {
 
     /************************************************
      *  USER FUNCTIONS
-     ***********************************************/ 
+     ***********************************************/
 
     /// @notice Redeem tokens from the treasury in a discount to market price
-    /// @param tokenAmount The amount of treasury tokens to buy in discount
+    /// @param amount The amount of USDC or ETH the user is willing to spend
     /// @param isUSDC Whether the payment is in USDC or WETH
-    function redeem(uint256 tokenAmount, bool isUSDC) external requiresTrust {
+    function redeem(uint256 amount, bool isUSDC) external requiresTrust {
         // Determine token price
-        uint256 tokenPrice;
-        if (price != 0) {
+        uint256 oraclePrice;
+        uint8 oracleDecimals = tokenOracleDecimals;
+        if (price == 0) {
+            oraclePrice = IPriceOracle(tokenOracle).latestAnswer();
+        } else {
             // Notice that the price is maintained manually here
             // so there is no guarantee that it is actually below
             // market price.
-            tokenPrice = price;
-        } else {
-            // TODO: Make use of price oracle
-            tokenPrice = IPriceOracle(tokenOracle).latestAnswer();
+            oraclePrice = price;
         }
 
         // Exchange tokens for WETH or USDC
-        uint256 amount = tokenAmount * tokenPrice;
+        // Note that the user needs to approve this amount of USDC/WETH
+        // to spend before initiating the redeem.
         if (isUSDC) {
+            // TODO: Make use of USDC price oracle
+            // https://data.chain.link/ethereum/mainnet/stablecoins/usdc-usd
+            uint8 stableDecimals = 6;
+            uint256 tokenAmount = amount * 1e8 / oraclePrice;
+            if (tokenDecimals > stableDecimals) {
+                tokenAmount *= 1e12;
+            } else if (tokenDecimals < stableDecimals) {
+                tokenAmount /= (2 << (stableDecimals - tokenDecimals));
+            }
             IERC20(USDC).transferFrom(msg.sender, address(this), amount);
-            IERC20(token).transferFrom(address(this), msg.sender, tokenAmount);
+            IERC20(token).transfer(msg.sender, tokenAmount);
         } else {
             uint256 ethPrice = IPriceOracle(ethOracle).latestAnswer();
             
