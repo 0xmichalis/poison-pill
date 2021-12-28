@@ -1,6 +1,7 @@
 /* eslint-disable camelcase */
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
+import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 
 import {
@@ -23,11 +24,12 @@ export function getFactory<T>(name: string): Promise<T> {
 describe("PoisonPill", function () {
   let deployer: SignerWithAddress;
   let treasury: SignerWithAddress;
-  let trustedUser: SignerWithAddress;
+  let trustedUser1: SignerWithAddress;
+  let trustedUser2: SignerWithAddress;
   let untrustedUser: SignerWithAddress;
 
   before(async () => {
-    [deployer, treasury, trustedUser, untrustedUser] =
+    [deployer, treasury, trustedUser1, trustedUser2, untrustedUser] =
       await ethers.getSigners();
   });
 
@@ -68,25 +70,29 @@ describe("PoisonPill", function () {
     });
 
     it("should properly prime user balances", async function () {
+      const treasuryTokenBalance = parseUnits("1000000", tokenDecimals);
       await token
         .connect(deployer)
-        .mint(treasury.address, 1000000 * tokenDecimals);
+        .mint(treasury.address, treasuryTokenBalance);
       expect(await token.balanceOf(treasury.address)).to.equal(
-        1000000 * tokenDecimals
+        treasuryTokenBalance
       );
 
-      await usdc
-        .connect(deployer)
-        .mint(trustedUser.address, 2000 * usdcDecimals);
-      expect(await usdc.balanceOf(trustedUser.address)).to.equal(
-        2000 * usdcDecimals
+      const userUsdcBalance = parseUnits("2000", usdcDecimals);
+      await usdc.connect(deployer).mint(trustedUser1.address, userUsdcBalance);
+      expect(await usdc.balanceOf(trustedUser1.address)).to.equal(
+        userUsdcBalance
       );
 
-      await usdc
-        .connect(deployer)
-        .mint(untrustedUser.address, 2000 * usdcDecimals);
+      const userEthBalance = parseEther("0.5");
+      await weth.connect(trustedUser2).deposit({ value: userEthBalance });
+      expect(await weth.balanceOf(trustedUser2.address)).to.equal(
+        userEthBalance
+      );
+
+      await usdc.connect(deployer).mint(untrustedUser.address, userUsdcBalance);
       expect(await usdc.balanceOf(untrustedUser.address)).to.equal(
-        2000 * usdcDecimals
+        userUsdcBalance
       );
     });
 
@@ -100,7 +106,7 @@ describe("PoisonPill", function () {
         wethOracle.address,
         tokenOracle.address,
         treasury.address,
-        [trustedUser.address],
+        [trustedUser1.address, trustedUser2.address],
         0,
         1000
       );
