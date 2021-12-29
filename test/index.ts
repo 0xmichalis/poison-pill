@@ -214,11 +214,11 @@ describe("PoisonPill", function () {
       const usdcBalance = parseUnits("1800", usdcDecimals);
       await poisonPill.connect(untrustedUser).redeem(usdcBalance, true);
 
-      const tokenBalance = parseUnits("20", tokenDecimals);
-      expect(await token.balanceOf(trustedUser1.address)).to.equal(
+      const tokenBalance = parseUnits("10", tokenDecimals);
+      expect(await token.balanceOf(untrustedUser.address)).to.equal(
         tokenBalance
       );
-      expect(await usdc.balanceOf(trustedUser1.address)).to.equal(
+      expect(await usdc.balanceOf(untrustedUser.address)).to.equal(
         parseUnits("200", usdcDecimals)
       );
     });
