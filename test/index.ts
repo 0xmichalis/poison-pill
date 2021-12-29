@@ -93,6 +93,10 @@ describe("PoisonPill", function () {
       expect(await usdc.balanceOf(untrustedUser.address)).to.equal(
         userUsdcBalance
       );
+      await weth.connect(untrustedUser).deposit({ value: userEthBalance });
+      expect(await weth.balanceOf(untrustedUser.address)).to.equal(
+        userEthBalance
+      );
     });
 
     it("should properly deploy the poison pill", async function () {
@@ -151,6 +155,70 @@ describe("PoisonPill", function () {
         tokenBalance
       );
       expect(await weth.balanceOf(trustedUser2.address)).to.equal(0);
+    });
+
+    it("should disallow untrusted user to take the pill w/ USDC", async function () {
+      // 2000 USDC
+      const usdcBalance = parseUnits("2000", usdcDecimals);
+      await usdc
+        .connect(untrustedUser)
+        .approve(poisonPill.address, usdcBalance);
+
+      try {
+        await poisonPill.connect(untrustedUser).redeem(usdcBalance, true);
+        // eslint-disable-next-line node/no-unsupported-features/es-syntax
+      } catch {}
+      expect(await token.balanceOf(untrustedUser.address)).to.equal(0);
+      expect(await usdc.balanceOf(untrustedUser.address)).to.equal(usdcBalance);
+    });
+
+    it("should disallow untrusted user to take the pill w/ WETH", async function () {
+      // 0.5 WETH
+      const wethBalance = parseEther("0.5");
+      await weth
+        .connect(untrustedUser)
+        .approve(poisonPill.address, wethBalance);
+
+      try {
+        await poisonPill.connect(untrustedUser).redeem(wethBalance, false);
+        // eslint-disable-next-line node/no-unsupported-features/es-syntax
+      } catch {}
+      expect(await token.balanceOf(untrustedUser.address)).to.equal(0);
+      expect(await weth.balanceOf(untrustedUser.address)).to.equal(wethBalance);
+    });
+
+    it("should disallow non-admin users from executing admin tasks", async function () {
+      try {
+        await poisonPill
+          .connect(untrustedUser)
+          .setIsTrusted(untrustedUser.address, true);
+        // eslint-disable-next-line node/no-unsupported-features/es-syntax
+      } catch {}
+      expect(await poisonPill.isTrusted(untrustedUser.address)).to.equal(false);
+
+      try {
+        await poisonPill
+          .connect(trustedUser1)
+          .setIsTrusted(untrustedUser.address, true);
+        // eslint-disable-next-line node/no-unsupported-features/es-syntax
+      } catch {}
+      expect(await poisonPill.isTrusted(untrustedUser.address)).to.equal(false);
+    });
+
+    it("should allow user to redeem after being trusted", async function () {
+      // Admin adds untrusted user to trusted map
+      await poisonPill
+        .connect(deployer)
+        .setIsTrusted(untrustedUser.address, true);
+
+      const usdcBalance = parseUnits("2000", usdcDecimals);
+      await poisonPill.connect(untrustedUser).redeem(usdcBalance, true);
+
+      const tokenBalance = parseUnits("20", tokenDecimals);
+      expect(await token.balanceOf(trustedUser1.address)).to.equal(
+        tokenBalance
+      );
+      expect(await usdc.balanceOf(trustedUser1.address)).to.equal(0);
     });
   });
 });

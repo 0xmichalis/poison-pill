@@ -5,9 +5,9 @@ contract TestPriceOracle {
     uint256 private _price;
     uint8 private _decimals;
 
-    constructor(uint256 price, uint8 decimals) {
+    constructor(uint256 price, uint8 decimals_) {
         _price = price;
-        _decimals = decimals;
+        _decimals = decimals_;
     }
 
     function decimals() external view returns (uint8) {

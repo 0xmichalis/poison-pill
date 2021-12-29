@@ -78,7 +78,7 @@ contract PoisonPill is Auth, Trust {
         uint256 _price,
         uint8 _priceDecimals,
         uint16 _discountBasisPoints
-    ) payable Auth(msg.sender, Authority(msg.sender)) Trust(address(0)) {
+    ) payable Auth(msg.sender, Authority(address(0))) Trust(address(0)) {
         require(_usdc != address(0), "!_usdc");
         require(_weth != address(0), "!_weth");
         require(_token != address(0), "!_token");
