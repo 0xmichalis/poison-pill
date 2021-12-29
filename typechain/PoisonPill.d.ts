@@ -24,13 +24,14 @@ interface PoisonPillInterface extends ethers.utils.Interface {
     "USDC()": FunctionFragment;
     "WETH()": FunctionFragment;
     "authority()": FunctionFragment;
-    "discountBasisPoints()": FunctionFragment;
+    "discountBP()": FunctionFragment;
     "ethOracle()": FunctionFragment;
     "isTrusted(address)": FunctionFragment;
     "owner()": FunctionFragment;
     "price()": FunctionFragment;
     "redeem(uint256,bool)": FunctionFragment;
     "setAuthority(address)": FunctionFragment;
+    "setDiscount(uint16)": FunctionFragment;
     "setIsTrusted(address,bool)": FunctionFragment;
     "setIsTrustedBatch(address[],bool)": FunctionFragment;
     "setOwner(address)": FunctionFragment;
@@ -45,7 +46,7 @@ interface PoisonPillInterface extends ethers.utils.Interface {
   encodeFunctionData(functionFragment: "WETH", values?: undefined): string;
   encodeFunctionData(functionFragment: "authority", values?: undefined): string;
   encodeFunctionData(
-    functionFragment: "discountBasisPoints",
+    functionFragment: "discountBP",
     values?: undefined
   ): string;
   encodeFunctionData(functionFragment: "ethOracle", values?: undefined): string;
@@ -59,6 +60,10 @@ interface PoisonPillInterface extends ethers.utils.Interface {
   encodeFunctionData(
     functionFragment: "setAuthority",
     values: [string]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "setDiscount",
+    values: [BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "setIsTrusted",
@@ -84,10 +89,7 @@ interface PoisonPillInterface extends ethers.utils.Interface {
   decodeFunctionResult(functionFragment: "USDC", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "WETH", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "authority", data: BytesLike): Result;
-  decodeFunctionResult(
-    functionFragment: "discountBasisPoints",
-    data: BytesLike
-  ): Result;
+  decodeFunctionResult(functionFragment: "discountBP", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "ethOracle", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "isTrusted", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
@@ -95,6 +97,10 @@ interface PoisonPillInterface extends ethers.utils.Interface {
   decodeFunctionResult(functionFragment: "redeem", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "setAuthority",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "setDiscount",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -116,26 +122,26 @@ interface PoisonPillInterface extends ethers.utils.Interface {
   decodeFunctionResult(functionFragment: "withdraw", data: BytesLike): Result;
 
   events: {
-    "AmountDeposited(uint256)": EventFragment;
     "AuthorityUpdated(address)": EventFragment;
+    "DiscountUpdated(uint16)": EventFragment;
     "OwnerUpdated(address)": EventFragment;
     "PriceUpdated(uint256)": EventFragment;
     "UserTrustUpdated(address,bool)": EventFragment;
   };
 
-  getEvent(nameOrSignatureOrTopic: "AmountDeposited"): EventFragment;
   getEvent(nameOrSignatureOrTopic: "AuthorityUpdated"): EventFragment;
+  getEvent(nameOrSignatureOrTopic: "DiscountUpdated"): EventFragment;
   getEvent(nameOrSignatureOrTopic: "OwnerUpdated"): EventFragment;
   getEvent(nameOrSignatureOrTopic: "PriceUpdated"): EventFragment;
   getEvent(nameOrSignatureOrTopic: "UserTrustUpdated"): EventFragment;
 }
 
-export type AmountDepositedEvent = TypedEvent<
-  [BigNumber] & { amount: BigNumber }
->;
-
 export type AuthorityUpdatedEvent = TypedEvent<
   [string] & { authority: string }
+>;
+
+export type DiscountUpdatedEvent = TypedEvent<
+  [number] & { discountBP: number }
 >;
 
 export type OwnerUpdatedEvent = TypedEvent<[string] & { owner: string }>;
@@ -196,7 +202,7 @@ export class PoisonPill extends BaseContract {
 
     authority(overrides?: CallOverrides): Promise<[string]>;
 
-    discountBasisPoints(overrides?: CallOverrides): Promise<[number]>;
+    discountBP(overrides?: CallOverrides): Promise<[number]>;
 
     ethOracle(overrides?: CallOverrides): Promise<[string]>;
 
@@ -214,6 +220,11 @@ export class PoisonPill extends BaseContract {
 
     setAuthority(
       newAuthority: string,
+      overrides?: Overrides & { from?: string | Promise<string> }
+    ): Promise<ContractTransaction>;
+
+    setDiscount(
+      _discountBP: BigNumberish,
       overrides?: Overrides & { from?: string | Promise<string> }
     ): Promise<ContractTransaction>;
 
@@ -256,7 +267,7 @@ export class PoisonPill extends BaseContract {
 
   authority(overrides?: CallOverrides): Promise<string>;
 
-  discountBasisPoints(overrides?: CallOverrides): Promise<number>;
+  discountBP(overrides?: CallOverrides): Promise<number>;
 
   ethOracle(overrides?: CallOverrides): Promise<string>;
 
@@ -274,6 +285,11 @@ export class PoisonPill extends BaseContract {
 
   setAuthority(
     newAuthority: string,
+    overrides?: Overrides & { from?: string | Promise<string> }
+  ): Promise<ContractTransaction>;
+
+  setDiscount(
+    _discountBP: BigNumberish,
     overrides?: Overrides & { from?: string | Promise<string> }
   ): Promise<ContractTransaction>;
 
@@ -316,7 +332,7 @@ export class PoisonPill extends BaseContract {
 
     authority(overrides?: CallOverrides): Promise<string>;
 
-    discountBasisPoints(overrides?: CallOverrides): Promise<number>;
+    discountBP(overrides?: CallOverrides): Promise<number>;
 
     ethOracle(overrides?: CallOverrides): Promise<string>;
 
@@ -334,6 +350,11 @@ export class PoisonPill extends BaseContract {
 
     setAuthority(
       newAuthority: string,
+      overrides?: CallOverrides
+    ): Promise<void>;
+
+    setDiscount(
+      _discountBP: BigNumberish,
       overrides?: CallOverrides
     ): Promise<void>;
 
@@ -363,14 +384,6 @@ export class PoisonPill extends BaseContract {
   };
 
   filters: {
-    "AmountDeposited(uint256)"(
-      amount?: null
-    ): TypedEventFilter<[BigNumber], { amount: BigNumber }>;
-
-    AmountDeposited(
-      amount?: null
-    ): TypedEventFilter<[BigNumber], { amount: BigNumber }>;
-
     "AuthorityUpdated(address)"(
       authority?: string | null
     ): TypedEventFilter<[string], { authority: string }>;
@@ -378,6 +391,14 @@ export class PoisonPill extends BaseContract {
     AuthorityUpdated(
       authority?: string | null
     ): TypedEventFilter<[string], { authority: string }>;
+
+    "DiscountUpdated(uint16)"(
+      discountBP?: null
+    ): TypedEventFilter<[number], { discountBP: number }>;
+
+    DiscountUpdated(
+      discountBP?: null
+    ): TypedEventFilter<[number], { discountBP: number }>;
 
     "OwnerUpdated(address)"(
       owner?: string | null
@@ -413,7 +434,7 @@ export class PoisonPill extends BaseContract {
 
     authority(overrides?: CallOverrides): Promise<BigNumber>;
 
-    discountBasisPoints(overrides?: CallOverrides): Promise<BigNumber>;
+    discountBP(overrides?: CallOverrides): Promise<BigNumber>;
 
     ethOracle(overrides?: CallOverrides): Promise<BigNumber>;
 
@@ -431,6 +452,11 @@ export class PoisonPill extends BaseContract {
 
     setAuthority(
       newAuthority: string,
+      overrides?: Overrides & { from?: string | Promise<string> }
+    ): Promise<BigNumber>;
+
+    setDiscount(
+      _discountBP: BigNumberish,
       overrides?: Overrides & { from?: string | Promise<string> }
     ): Promise<BigNumber>;
 
@@ -474,9 +500,7 @@ export class PoisonPill extends BaseContract {
 
     authority(overrides?: CallOverrides): Promise<PopulatedTransaction>;
 
-    discountBasisPoints(
-      overrides?: CallOverrides
-    ): Promise<PopulatedTransaction>;
+    discountBP(overrides?: CallOverrides): Promise<PopulatedTransaction>;
 
     ethOracle(overrides?: CallOverrides): Promise<PopulatedTransaction>;
 
@@ -497,6 +521,11 @@ export class PoisonPill extends BaseContract {
 
     setAuthority(
       newAuthority: string,
+      overrides?: Overrides & { from?: string | Promise<string> }
+    ): Promise<PopulatedTransaction>;
+
+    setDiscount(
+      _discountBP: BigNumberish,
       overrides?: Overrides & { from?: string | Promise<string> }
     ): Promise<PopulatedTransaction>;
 

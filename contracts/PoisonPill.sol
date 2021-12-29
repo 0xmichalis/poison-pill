@@ -35,17 +35,18 @@ contract PoisonPill is Auth, Trust {
     address public immutable ethOracle;
 
     /// @notice Manual price, in case on-chain oracle price does not exist
+    /// This can either be the market price of the token in which case
+    /// discountBP needs to be specified to apply the price discount or in
+    /// case discountBP is set to zero, this can track the discounted price.
     uint256 public price;
 
-    /// @notice Basis points to discount from the market price
-    uint16 public discountBasisPoints;
+    /// @notice Basis points to discount from price
+    uint16 public discountBP;
 
-    /// @notice Decimals in the response from the eth oracle to account for
+    /// @notice Decimals in the eth oracle response
     uint8 private ethOracleDecimals;
 
     /// @notice Decimals in the token
-    // TODO: Check whether it is more expensive to read from storage vs making
-    // the external call.
     uint8 private tokenDecimals;
 
     /// @notice Decimals in the token oracle response
@@ -59,8 +60,8 @@ contract PoisonPill is Auth, Trust {
     /// @notice Event emitted when the price of the token is manually updated
     event PriceUpdated(uint256 price);
 
-    /// @notice Event emitted when funds are deposited from the treasury to this contract
-    event AmountDeposited(uint256 amount);
+    /// @notice Event emitted when the discount is updated
+    event DiscountUpdated(uint16 discountBP);
 
 
     /************************************************
@@ -77,7 +78,7 @@ contract PoisonPill is Auth, Trust {
         address[] memory _users,
         uint256 _price,
         uint8 _priceDecimals,
-        uint16 _discountBasisPoints
+        uint16 _discountBP
     ) payable Auth(msg.sender, Authority(address(0))) Trust(address(0)) {
         require(_usdc != address(0), "!_usdc");
         require(_weth != address(0), "!_weth");
@@ -87,16 +88,19 @@ contract PoisonPill is Auth, Trust {
         require(_tokenOracle == address(0) || _price == 0, "Only one of _tokenOracle, _price");
         if (_tokenOracle != address(0)) {
             // Need to have the discount percentage specified in case we can
-            // retrieve the token price via the price oracle.
-            require(_discountBasisPoints != 0, "!_discountBasisPoints");
+            // retrieve the token price via the price oracle. This assumes the
+            // used oracle returns the market price and not the target discounted
+            // price.
+            require(_discountBP != 0, "!_discountBP");
         }
+        require(_discountBP <= 10000, "Invalid discount basis points");
 
         USDC = _usdc;
         WETH = _weth;
         token = _token;
         ethOracle = _ethOracle;
         tokenOracle = _tokenOracle;
-        discountBasisPoints = _discountBasisPoints;
+        discountBP = _discountBP;
         treasury = _treasury;
         ethOracleDecimals = IPriceOracle(ethOracle).decimals();
         tokenDecimals = IERC20(token).decimals();
@@ -135,10 +139,17 @@ contract PoisonPill is Auth, Trust {
     }
 
     function setPrice(uint256 _price) external requiresAuth {
-        // TODO: Guard when token oracle is provided?
         price = _price;
 
         emit PriceUpdated(_price);
+    }
+
+    function setDiscount(uint16 _discountBP) external requiresAuth {
+        require(_discountBP <= 10000, "Invalid discount basis points");
+
+        discountBP = _discountBP;
+
+        emit DiscountUpdated(_discountBP);
     }
 
 
@@ -147,6 +158,7 @@ contract PoisonPill is Auth, Trust {
      ***********************************************/
 
     /// @notice Withdraw all acquired funds back to the treasury
+    /// On purpose left unguarded, anyone should be able to call it.
     function withdraw() external {
         uint256 ethBalance = IWETH(WETH).balanceOf(address(this));
         if (ethBalance != 0) {
@@ -164,7 +176,7 @@ contract PoisonPill is Auth, Trust {
      ***********************************************/
 
     /// @notice Redeem tokens from the treasury in a discount to market price
-    /// @param amount The amount of USDC or ETH the user is willing to spend
+    /// @param amount The amount of USDC or WETH the user is willing to spend
     /// @param isUSDC Whether the payment is in USDC or WETH
     function redeem(uint256 amount, bool isUSDC) external requiresTrust {
         // Determine token price
@@ -177,6 +189,12 @@ contract PoisonPill is Auth, Trust {
             // so there is no guarantee that it is actually below
             // market price.
             oraclePrice = price;
+        }
+
+        // Apply discount if provided
+        if (discountBP != 0) {
+            uint256 discount = oraclePrice * discountBP / 10000;
+            oraclePrice -= discount;
         }
 
         // Exchange tokens for WETH or USDC
