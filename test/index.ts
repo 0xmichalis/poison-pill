@@ -27,9 +27,10 @@ describe("PoisonPill", function () {
   let trustedUser1: SignerWithAddress;
   let trustedUser2: SignerWithAddress;
   let untrustedUser: SignerWithAddress;
+  let bob: SignerWithAddress;
 
   before(async () => {
-    [deployer, treasury, trustedUser1, trustedUser2, untrustedUser] =
+    [deployer, treasury, trustedUser1, trustedUser2, untrustedUser, bob] =
       await ethers.getSigners();
   });
 
@@ -219,6 +220,20 @@ describe("PoisonPill", function () {
       );
       expect(await usdc.balanceOf(trustedUser1.address)).to.equal(
         parseUnits("200", usdcDecimals)
+      );
+    });
+
+    it("should allow any user to withdraw funds back to the treasury", async function () {
+      expect(await weth.balanceOf(treasury.address)).to.equal(0);
+      expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+
+      await poisonPill.connect(bob).withdraw();
+
+      expect(await weth.balanceOf(treasury.address)).to.equal(
+        parseEther("0.5")
+      );
+      expect(await usdc.balanceOf(treasury.address)).to.equal(
+        parseUnits("3600", usdcDecimals)
       );
     });
   });
