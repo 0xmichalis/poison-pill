@@ -36,7 +36,6 @@ describe("PoisonPill", function () {
   const oracleDecimals = 8;
   const tokenDecimals = 18;
   const usdcDecimals = 6;
-  const wethDecimals = 18;
   const treasuryTokenBalance = parseUnits("1000000", tokenDecimals);
 
   let usdc: USDC;
@@ -56,7 +55,7 @@ describe("PoisonPill", function () {
 
       wethOracle = await (
         await getFactory<TestPriceOracle__factory>("TestPriceOracle")
-      ).deploy(parseUnits("3900", oracleDecimals), oracleDecimals);
+      ).deploy(parseUnits("4000", oracleDecimals), oracleDecimals);
       await wethOracle.deployed();
 
       token = await (
@@ -123,16 +122,35 @@ describe("PoisonPill", function () {
       );
     });
 
-    it("should allow trusted user to take the pill", async function () {
-      // 200 USDC
+    it("should allow trusted user to take the pill w/ USDC", async function () {
+      // 2000 USDC
       const usdcBalance = parseUnits("2000", usdcDecimals);
-      // Oracle price is 100 so the user should get 20 TestTokens
-      const tokenBalance = parseUnits("20", tokenDecimals);
       await usdc.connect(trustedUser1).approve(poisonPill.address, usdcBalance);
       await poisonPill.connect(trustedUser1).redeem(usdcBalance, true);
+
+      // Oracle price is 100 so the user should get 20 TestTokens
+      const tokenBalance = parseUnits("20", tokenDecimals);
       expect(await token.balanceOf(trustedUser1.address)).to.equal(
         tokenBalance
       );
+      expect(await usdc.balanceOf(trustedUser1.address)).to.equal(0);
+    });
+
+    it("should allow trusted user to take the pill w/ WETH", async function () {
+      // Oracle price update
+      await tokenOracle.setPrice(parseUnits("200", oracleDecimals));
+
+      // 0.5 WETH
+      const wethBalance = parseEther("0.5");
+      await weth.connect(trustedUser2).approve(poisonPill.address, wethBalance);
+      await poisonPill.connect(trustedUser2).redeem(wethBalance, false);
+
+      // Oracle price is 200 so the user should get 20 TestTokens (4000 * 0.5 / 200)
+      const tokenBalance = parseUnits("10", tokenDecimals);
+      expect(await token.balanceOf(trustedUser2.address)).to.equal(
+        tokenBalance
+      );
+      expect(await weth.balanceOf(trustedUser2.address)).to.equal(0);
     });
   });
 });

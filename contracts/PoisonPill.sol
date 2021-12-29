@@ -150,12 +150,12 @@ contract PoisonPill is Auth, Trust {
     function withdraw() external {
         uint256 ethBalance = IWETH(WETH).balanceOf(address(this));
         if (ethBalance != 0) {
-            IWETH(WETH).transferFrom(address(this), treasury, ethBalance);
+            IWETH(WETH).transfer(treasury, ethBalance);
         }
 
         uint256 usdcBalance = IERC20(USDC).balanceOf(address(this));
         if (usdcBalance != 0) {
-            IERC20(USDC).transferFrom(address(this), treasury, usdcBalance);
+            IERC20(USDC).transfer(treasury, usdcBalance);
         }
     }
 
@@ -195,8 +195,19 @@ contract PoisonPill is Auth, Trust {
             IERC20(USDC).transferFrom(msg.sender, address(this), amount);
             IERC20(token).transfer(msg.sender, tokenAmount);
         } else {
+            // TODO: Accept direct ETH payments
             uint256 ethPrice = IPriceOracle(ethOracle).latestAnswer();
-            
+            uint256 usdAmount = amount * ethPrice / (10 ** ethOracleDecimals);
+
+            uint8 ethDecimals = 18;
+            uint256 tokenAmount = usdAmount * (10 ** oracleDecimals) / oraclePrice;
+            if (tokenDecimals > ethDecimals) {
+                tokenAmount *= (10 ** (tokenDecimals - ethDecimals));
+            } else if (tokenDecimals < ethDecimals) {
+                tokenAmount /= (10 ** (ethDecimals - tokenDecimals));
+            }
+            IERC20(WETH).transferFrom(msg.sender, address(this), amount);
+            IERC20(token).transfer(msg.sender, tokenAmount);
         }
 
     }
