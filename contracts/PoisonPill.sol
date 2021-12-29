@@ -85,13 +85,14 @@ contract PoisonPill is Auth, Trust {
         require(_token != address(0), "!_token");
         require(_ethOracle != address(0), "!_ethOracle");
         require(_tokenOracle != address(0) || _price != 0, "Need one of _tokenOracle, _price");
-        require(_tokenOracle == address(0) || _price == 0, "Only one of _tokenOracle, _price");
         if (_tokenOracle != address(0)) {
             // Need to have the discount percentage specified in case we can
             // retrieve the token price via the price oracle. This assumes the
             // used oracle returns the market price and not the target discounted
             // price.
             require(_discountBP != 0, "!_discountBP");
+        } else {
+            require(_priceDecimals != 0, "!_priceDecimals");
         }
         require(_discountBP <= 10000, "Invalid discount basis points");
 
@@ -185,9 +186,6 @@ contract PoisonPill is Auth, Trust {
         if (price == 0) {
             oraclePrice = IPriceOracle(tokenOracle).latestAnswer();
         } else {
-            // Notice that the price is maintained manually here
-            // so there is no guarantee that it is actually below
-            // market price.
             oraclePrice = price;
         }
 
