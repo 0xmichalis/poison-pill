@@ -7,9 +7,9 @@ async function main() {
     const usdc = process.env.USDC ? process.env.USDC : "";
     const weth = process.env.WETH ? process.env.WETH : "";
     const token = process.env.TOKEN ? process.env.TOKEN : "";
-    const treasury = process.env.TREASURY ? process.env.TREASURY : "";
     const ethOracle = process.env.ETH_ORACLE ? process.env.ETH_ORACLE : "";
     const tokenOracle = process.env.TOKEN_ORACLE ? process.env.TOKEN_ORACLE : "";
+    const treasury = process.env.TREASURY ? process.env.TREASURY : "";
     // TODO: Parse whitelist from env
     const price = process.env.PRICE ? Number(process.env.PRICE) : 0;
     const priceDecimals = process.env.PRICE_DECIMALS ? Number(process.env.PRICE_DECIMALS) : 0;
