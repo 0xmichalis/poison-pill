@@ -38,6 +38,7 @@
   },
   "scripts": {
     "build": "npx hardhat compile",
+    "deploy": "npx hardhat run --network",
     "test": "npx hardhat test"
   }
 }

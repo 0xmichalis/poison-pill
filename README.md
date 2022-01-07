@@ -32,6 +32,30 @@ but it can still be facilitated.
 3. Now, whitelisted users can use `$WETH` or `$USDC` to start buying `$TOKEN` in discount.
 4. Any acquired `$WETH` or `$USDC` can be withdrawn by anyone back to the treasury.
 
+## Build
+
+```
+yarn
+yarn build
+```
+
+## Test
+
+```
+yarn test
+```
+
+Find a variety of Chainlink feeds to test with at https://market.link.
+
+## Deploy in Ropsten
+
+Copy `.env.example` to `.env` and configure accordingly. Once you have all the config
+in place, you can deploy with the following command:
+```
+yarn deploy ropsten ./scripts/deploy.ts
+```
+Update the Hardhat config and `.env` accordinly to deploy in Mainnet.
+
 ## Disclaimer
 
 These smart contracts are being provided as is. No guarantee, representation, or warranty is being made,
