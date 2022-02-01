@@ -1,0 +1,4 @@
+[default]
+remappings = ['@rari-capital/solmate=lib/solmate/', 'ds-test/=lib/ds-test/src/']
+
+# See more config options https://github.com/gakonst/foundry/tree/master/config

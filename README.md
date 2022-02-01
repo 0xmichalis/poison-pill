@@ -32,29 +32,28 @@ but it can still be facilitated.
 3. Now, whitelisted users can use `$WETH` or `$USDC` to start buying `$TOKEN` in discount.
 4. Any acquired `$WETH` or `$USDC` can be withdrawn by anyone back to the treasury.
 
+[Forge](https://github.com/gakonst/foundry/tree/master/forge) is used under the [hood](https://www.gnu.org/software/make/) to build, test, and deploy the contract.
+
 ## Build
 
 ```
-yarn
-yarn build
+make build
 ```
 
 ## Test
 
 ```
-yarn test
+make test
 ```
 
 Find a variety of Chainlink feeds to test with at https://market.link.
 
 ## Deploy in Ropsten
 
-Copy `.env.example` to `.env` and configure accordingly. Once you have all the config
-in place, you can deploy with the following command:
+Update the `deploy-ropsten` target in Makefile with your own parameters, then:
 ```
-yarn deploy ropsten ./scripts/deploy.ts
+make deploy-ropsten
 ```
-Update the Hardhat config and `.env` accordinly to deploy in Mainnet.
 
 ## Disclaimer
 
