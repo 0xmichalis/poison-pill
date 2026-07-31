@@ -339,6 +339,7 @@ contract PoisonPill is Owned {
         (, int256 answer,, uint256 updatedAt,) = oracle.latestRoundData();
         if (answer <= 0) revert InvalidOraclePrice();
         // Staleness bounds are hours, far beyond timestamp manipulation range.
+        // forge-lint: disable-next-item(block-timestamp)
         // slither-disable-next-line timestamp
         if (block.timestamp - updatedAt > maxOracleAge) revert StaleOraclePrice();
         // casting to 'uint256' is safe because answer is checked positive above
