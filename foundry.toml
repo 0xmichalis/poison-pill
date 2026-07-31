@@ -1,4 +1,43 @@
-[default]
-remappings = ['@rari-capital/solmate=lib/solmate/', 'ds-test/=lib/ds-test/src/']
+[profile.default]
+solc_version = "0.8.35"
+optimizer = true
+optimizer_runs = 1_000_000
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+libs = ["dependencies"]
+ignored_warnings_from = ["dependencies"]
+remappings = [
+    "solmate/=dependencies/solmate-6.8.0/src/",
+    "forge-std/=dependencies/forge-std-1.16.2/src/",
+]
 
-# See more config options https://github.com/gakonst/foundry/tree/master/config
+# Naming lints are excluded in favor of solmate-style lowercase public
+# immutables and BP/USD-style acronyms.
+[lint]
+exclude_lints = [
+    "mixed-case-variable",
+    "screaming-snake-case-const",
+    "screaming-snake-case-immutable",
+]
+
+[dependencies]
+forge-std = "1.16.2"
+solmate = "6.8.0"
+
+[soldeer]
+remappings_generate = false
+
+[profile.default.fuzz]
+runs = 1024
+
+[profile.default.invariant]
+runs = 64
+depth = 128
+fail_on_revert = true
+
+[fmt]
+line_length = 120
+bracket_spacing = true
+int_types = "long"

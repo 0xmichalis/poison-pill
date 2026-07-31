@@ -1,230 +1,348 @@
-//SPDX-License-Identifier: Anti-996 License
-pragma solidity ^0.8.10;
+// SPDX-License-Identifier: Anti-996 License
+pragma solidity 0.8.35;
 
-import { Auth, Authority } from "@rari-capital/solmate/src/auth/Auth.sol";
-import { Trust } from "@rari-capital/solmate/src/auth/Trust.sol";
+import { Owned } from "solmate/auth/Owned.sol";
+import { ERC20 } from "solmate/tokens/ERC20.sol";
+import { SafeTransferLib } from "solmate/utils/SafeTransferLib.sol";
+import { FixedPointMathLib } from "solmate/utils/FixedPointMathLib.sol";
 
-import { IERC20 } from "./interfaces/IERC20.sol";
-import { IWETH } from "./interfaces/IWETH.sol";
-import { IPriceOracle } from "./interfaces/IPriceOracle.sol";
+import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 
-// TODO: Limit how much each user can buy
-contract PoisonPill is Auth, Trust {
-    /************************************************
-     *  VARIABLES & CONSTANTS
-     ***********************************************/
+/// @title PoisonPill
+/// @notice On-chain defense against hostile takeovers: sells an entity's
+/// treasury token at a discount, exclusively to a whitelisted group.
+///
+/// Token price discovery, in order of precedence:
+/// 1. `price` — a manually maintained price (quoted with `priceDecimals`
+///    decimals). Whenever non-zero it overrides the oracle.
+/// 2. `tokenOracle` — a Chainlink-compatible USD feed for the token.
+///
+/// `discountBP` basis points are shaved off whichever price applies.
+///
+/// Payment is accepted in any registered asset. Each asset is valued
+/// either through its own Chainlink-compatible USD feed or, when no feed
+/// is configured, assumed to be a stablecoin holding a 1:1 USD peg.
+///
+/// Proceeds can be pushed to the treasury by anyone; unsold treasury
+/// tokens can only be recovered by the owner, and only back to the
+/// treasury.
+contract PoisonPill is Owned {
+    using SafeTransferLib for ERC20;
+    using FixedPointMathLib for uint256;
 
-    /// @notice WETH contract address
-    address public immutable WETH;
+    /*//////////////////////////////////////////////////////////////
+                                 ERRORS
+    //////////////////////////////////////////////////////////////*/
 
-    /// @notice USDC contract address
-    /// In code it is currently assumed that USDC will always
-    /// hold its peg.
-    address public immutable USDC;
+    error ZeroAddress();
+    error ZeroAmount();
+    error PriceSourceRequired();
+    error PriceDecimalsRequired();
+    error DiscountRequiredWithOracle();
+    error InvalidDiscount();
+    error InvalidPaymentAsset();
+    error PaymentAssetRequired();
+    error NotWhitelisted();
+    error InvalidOraclePrice();
+    error StaleOraclePrice();
+    error SlippageExceeded();
 
-    /// @notice ERC20 token to poison pill
-    address public immutable token;
+    /*//////////////////////////////////////////////////////////////
+                                 EVENTS
+    //////////////////////////////////////////////////////////////*/
 
-    /// @notice Owner of the funds to poison pill
+    event WhitelistUpdated(address indexed user, bool whitelisted);
+    event PaymentAssetAdded(address indexed asset, address indexed oracle);
+    event PaymentAssetRemoved(address indexed asset);
+    event PriceUpdated(uint256 price);
+    event DiscountUpdated(uint16 discountBP);
+    event MaxOracleAgeUpdated(uint32 maxOracleAge);
+    event Redeemed(address indexed user, address indexed paymentAsset, uint256 amountPaid, uint256 tokensOut);
+    event Withdrawn(address indexed asset, uint256 amount);
+    event Swept(uint256 amount);
+
+    /*//////////////////////////////////////////////////////////////
+                                 TYPES
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice A payment asset accepted by the pill. Without an oracle the
+    /// asset is assumed to be a stablecoin holding a 1:1 USD peg.
+    struct PaymentAsset {
+        AggregatorV3Interface oracle;
+        uint8 assetDecimals;
+        uint8 oracleDecimals;
+        bool enabled;
+    }
+
+    struct Config {
+        address token;
+        address tokenOracle; // optional if price != 0
+        address treasury;
+        uint256 price; // optional if tokenOracle is set
+        uint8 priceDecimals; // required when price is the only source
+        uint16 discountBP; // required when tokenOracle is set
+        uint32 maxOracleAge;
+        address[] paymentAssets;
+        address[] paymentOracles; // zero address => assumed 1:1 USD peg
+        address[] whitelist;
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                               IMMUTABLES
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Treasury token being sold at a discount.
+    ERC20 public immutable token;
+
+    /// @notice Recipient of sale proceeds and swept funds.
     address public immutable treasury;
 
-    /// @notice Oracle to get token price from
-    address public immutable tokenOracle;
+    /// @notice USD feed for `token`. Optional when a manual `price` is maintained.
+    AggregatorV3Interface public immutable tokenOracle;
 
-    /// @notice Oracle to get ETH price from
-    address public immutable ethOracle;
+    /// @notice Decimals of the token price, whether manual or oracle-provided.
+    uint8 public immutable priceDecimals;
 
-    /// @notice Manual price, in case on-chain oracle price does not exist
-    /// This can either be the market price of the token in which case
-    /// discountBP needs to be specified to apply the price discount or in
-    /// case discountBP is set to zero, this can track the discounted price.
+    uint8 internal immutable tokenDecimals;
+
+    uint256 internal constant BPS = 10_000;
+    uint256 internal constant WAD = 1e18;
+
+    /*//////////////////////////////////////////////////////////////
+                                STORAGE
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Manual token price with `priceDecimals` decimals.
+    /// Non-zero overrides `tokenOracle`; zero requires `tokenOracle` to be set.
     uint256 public price;
 
-    /// @notice Basis points to discount from price
+    /// @notice Basis points discounted from the token price.
     uint16 public discountBP;
 
-    /// @notice Decimals in the eth oracle response
-    uint8 private ethOracleDecimals;
+    /// @notice Oldest acceptable oracle update; anything older reverts redeems.
+    uint32 public maxOracleAge;
 
-    /// @notice Decimals in the token
-    uint8 private tokenDecimals;
+    /// @notice Accounts allowed to redeem.
+    mapping(address => bool) public isWhitelisted;
 
-    /// @notice Decimals in the token oracle response
-    uint8 private tokenOracleDecimals;
+    /// @notice Assets accepted as payment.
+    mapping(ERC20 => PaymentAsset) public paymentAssets;
 
+    /*//////////////////////////////////////////////////////////////
+                              CONSTRUCTOR
+    //////////////////////////////////////////////////////////////*/
 
-    /************************************************
-     *  EVENTS
-     ***********************************************/
+    constructor(Config memory config) Owned(msg.sender) {
+        _validateConfig(config);
 
-    /// @notice Event emitted when the price of the token is manually updated
-    event PriceUpdated(uint256 price);
-
-    /// @notice Event emitted when the discount is updated
-    event DiscountUpdated(uint16 discountBP);
-
-
-    /************************************************
-     *  CONSTRUCTOR
-     ***********************************************/
-
-    constructor(
-        address _usdc,
-        address _weth,
-        address _token,
-        address _ethOracle,
-        address _tokenOracle,
-        address _treasury,
-        address[] memory _users,
-        uint256 _price,
-        uint8 _priceDecimals,
-        uint16 _discountBP
-    ) payable Auth(msg.sender, Authority(address(0))) Trust(address(0)) {
-        require(_usdc != address(0), "!_usdc");
-        require(_weth != address(0), "!_weth");
-        require(_token != address(0), "!_token");
-        require(_ethOracle != address(0), "!_ethOracle");
-        require(_tokenOracle != address(0) || _price != 0, "Need one of _tokenOracle, _price");
-        if (_tokenOracle != address(0)) {
-            // Need to have the discount percentage specified in case we can
-            // retrieve the token price via the price oracle. This assumes the
-            // used oracle returns the market price and not the target discounted
-            // price.
-            require(_discountBP != 0, "!_discountBP");
+        if (config.tokenOracle != address(0)) {
+            priceDecimals = AggregatorV3Interface(config.tokenOracle).decimals();
         } else {
-            require(_priceDecimals != 0, "!_priceDecimals");
+            priceDecimals = config.priceDecimals;
         }
-        require(_discountBP <= 10000, "Invalid discount basis points");
 
-        USDC = _usdc;
-        WETH = _weth;
-        token = _token;
-        ethOracle = _ethOracle;
-        tokenOracle = _tokenOracle;
-        discountBP = _discountBP;
-        treasury = _treasury;
-        ethOracleDecimals = IPriceOracle(ethOracle).decimals();
-        tokenDecimals = IERC20(token).decimals();
-        if (_price == 0) {
-            tokenOracleDecimals = IPriceOracle(tokenOracle).decimals();
+        token = ERC20(config.token);
+        tokenOracle = AggregatorV3Interface(config.tokenOracle);
+        treasury = config.treasury;
+        discountBP = config.discountBP;
+        maxOracleAge = config.maxOracleAge;
+
+        tokenDecimals = ERC20(config.token).decimals();
+
+        if (config.price != 0) {
+            price = config.price;
+            emit PriceUpdated(config.price);
+        }
+
+        for (uint256 i = 0; i < config.paymentAssets.length; ++i) {
+            _addPaymentAsset(ERC20(config.paymentAssets[i]), AggregatorV3Interface(config.paymentOracles[i]));
+        }
+
+        for (uint256 i = 0; i < config.whitelist.length; ++i) {
+            isWhitelisted[config.whitelist[i]] = true;
+            emit WhitelistUpdated(config.whitelist[i], true);
+        }
+    }
+
+    function _validateConfig(Config memory config) internal pure {
+        if (config.token == address(0) || config.treasury == address(0)) revert ZeroAddress();
+        if (config.tokenOracle == address(0) && config.price == 0) revert PriceSourceRequired();
+        if (config.discountBP >= BPS) revert InvalidDiscount();
+        if (config.maxOracleAge == 0) revert ZeroAmount();
+        if (config.paymentAssets.length == 0 || config.paymentAssets.length != config.paymentOracles.length) {
+            revert PaymentAssetRequired();
+        }
+        // An oracle reports market price, so a pill without a discount would
+        // sell at market — pointless. Require one upfront. Without an oracle,
+        // the decimals of the manual price must be explicit.
+        if (config.tokenOracle != address(0) && config.discountBP == 0) revert DiscountRequiredWithOracle();
+        if (config.tokenOracle == address(0) && config.priceDecimals == 0) revert PriceDecimalsRequired();
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                             ADMIN FUNCTIONS
+    //////////////////////////////////////////////////////////////*/
+
+    function setWhitelisted(address user, bool whitelisted) public onlyOwner {
+        isWhitelisted[user] = whitelisted;
+
+        emit WhitelistUpdated(user, whitelisted);
+    }
+
+    function setWhitelistedBatch(address[] calldata users, bool whitelisted) external onlyOwner {
+        for (uint256 i = 0; i < users.length; ++i) {
+            setWhitelisted(users[i], whitelisted);
+        }
+    }
+
+    /// @notice Accept `asset` as payment, valued through `oracle`, or
+    /// assumed 1:1 USD-pegged when `oracle` is the zero address.
+    function addPaymentAsset(ERC20 asset, AggregatorV3Interface oracle) external onlyOwner {
+        _addPaymentAsset(asset, oracle);
+    }
+
+    function removePaymentAsset(ERC20 asset) external onlyOwner {
+        if (!paymentAssets[asset].enabled) revert InvalidPaymentAsset();
+
+        delete paymentAssets[asset];
+
+        emit PaymentAssetRemoved(address(asset));
+    }
+
+    /// @notice Update the manual price, quoted with `priceDecimals` decimals.
+    /// Setting zero falls back to the oracle and requires one to be configured.
+    function setPrice(uint256 newPrice) external onlyOwner {
+        if (newPrice == 0 && address(tokenOracle) == address(0)) revert PriceSourceRequired();
+
+        price = newPrice;
+
+        emit PriceUpdated(newPrice);
+    }
+
+    function setDiscount(uint16 newDiscountBP) external onlyOwner {
+        if (newDiscountBP >= BPS) revert InvalidDiscount();
+
+        discountBP = newDiscountBP;
+
+        emit DiscountUpdated(newDiscountBP);
+    }
+
+    function setMaxOracleAge(uint32 newMaxOracleAge) external onlyOwner {
+        if (newMaxOracleAge == 0) revert ZeroAmount();
+
+        maxOracleAge = newMaxOracleAge;
+
+        emit MaxOracleAgeUpdated(newMaxOracleAge);
+    }
+
+    function _addPaymentAsset(ERC20 asset, AggregatorV3Interface oracle) internal {
+        // The treasury token cannot double as a payment asset, and payment
+        // assets must expose decimals (also implies the address has code).
+        if (address(asset) == address(0) || address(asset) == address(token)) revert InvalidPaymentAsset();
+
+        // Deploy-time/owner-only registration over a short owner-provided list.
+        // slither-disable-next-line calls-loop
+        paymentAssets[asset] = PaymentAsset({
+            oracle: oracle,
+            assetDecimals: asset.decimals(),
+            oracleDecimals: address(oracle) == address(0) ? 0 : oracle.decimals(),
+            enabled: true
+        });
+
+        emit PaymentAssetAdded(address(asset), address(oracle));
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                           TREASURY FUNCTIONS
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Push sale proceeds of `asset` to the treasury.
+    /// Deliberately permissionless: proceeds have only one valid
+    /// destination. The treasury token itself is excluded so nobody can
+    /// defuse the pill mid-sale.
+    function withdraw(ERC20 asset) external {
+        if (address(asset) == address(token)) revert InvalidPaymentAsset();
+
+        uint256 balance = asset.balanceOf(address(this));
+        // Empty-balance short circuit; nothing attacker-influenced is compared.
+        // slither-disable-next-line incorrect-equality
+        if (balance == 0) return;
+
+        asset.safeTransfer(treasury, balance);
+
+        emit Withdrawn(address(asset), balance);
+    }
+
+    /// @notice Recover unsold treasury tokens once the pill has served its
+    /// purpose. Owner-gated so nobody can defuse the pill mid-sale, but
+    /// funds can only ever reach the treasury.
+    function sweep() external onlyOwner {
+        uint256 balance = token.balanceOf(address(this));
+        // slither-disable-next-line incorrect-equality
+        if (balance == 0) return;
+
+        token.safeTransfer(treasury, balance);
+
+        emit Swept(balance);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                             USER FUNCTIONS
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Buy treasury tokens at the discounted price.
+    /// @param paymentAsset Registered asset to pay with (must be approved).
+    /// @param amount Amount of `paymentAsset` to spend.
+    /// @param minTokensOut Minimum tokens acceptable; guards against price
+    /// moves between submission and execution.
+    function redeem(ERC20 paymentAsset, uint256 amount, uint256 minTokensOut) external returns (uint256 tokensOut) {
+        if (!isWhitelisted[msg.sender]) revert NotWhitelisted();
+        if (amount == 0) revert ZeroAmount();
+
+        tokensOut = previewRedeem(paymentAsset, amount);
+        if (tokensOut == 0) revert ZeroAmount();
+        if (tokensOut < minTokensOut) revert SlippageExceeded();
+
+        paymentAsset.safeTransferFrom(msg.sender, address(this), amount);
+        token.safeTransfer(msg.sender, tokensOut);
+
+        emit Redeemed(msg.sender, address(paymentAsset), amount, tokensOut);
+    }
+
+    /// @notice Tokens received for a given payment at current prices.
+    function previewRedeem(ERC20 paymentAsset, uint256 amount) public view returns (uint256) {
+        PaymentAsset memory asset = paymentAssets[paymentAsset];
+        if (!asset.enabled) revert InvalidPaymentAsset();
+
+        uint256 usdWad;
+        if (address(asset.oracle) == address(0)) {
+            usdWad = amount.mulDivDown(WAD, 10 ** asset.assetDecimals);
         } else {
-            price = _price;
-            tokenOracleDecimals = _priceDecimals;
-            emit PriceUpdated(_price);
+            uint256 assetUsd = _readOracle(asset.oracle);
+            usdWad = amount.mulDivDown(assetUsd, 10 ** asset.oracleDecimals).mulDivDown(WAD, 10 ** asset.assetDecimals);
         }
-        unchecked {
-            for (uint i = 0; i < _users.length; i++) {
-                isTrusted[_users[i]] = true;
-                emit UserTrustUpdated(_users[i], true);
-            }
-        }
+        return usdWad.mulDivDown(10 ** priceDecimals, discountedPrice()).mulDivDown(10 ** tokenDecimals, WAD);
     }
 
-
-    /************************************************
-     *  ADMIN FUNCTIONS
-     ***********************************************/
-
-    function setIsTrustedBatch(address[] memory _users, bool trusted) external requiresAuth {
-        unchecked {
-            for (uint i = 0; i < _users.length; i++) {
-                setIsTrusted(_users[i], trusted);
-            }
-        }
+    /// @notice Current token price after discount, with `priceDecimals` decimals.
+    function discountedPrice() public view returns (uint256) {
+        uint256 tokenPrice = price != 0 ? price : _readOracle(tokenOracle);
+        uint256 discounted = tokenPrice.mulDivDown(BPS - discountBP, BPS);
+        if (discounted == 0) revert InvalidOraclePrice();
+        return discounted;
     }
 
-    function setIsTrusted(address user, bool trusted) public override requiresAuth {
-        isTrusted[user] = trusted;
-
-        emit UserTrustUpdated(user, trusted);
-    }
-
-    function setPrice(uint256 _price) external requiresAuth {
-        price = _price;
-
-        emit PriceUpdated(_price);
-    }
-
-    function setDiscount(uint16 _discountBP) external requiresAuth {
-        require(_discountBP <= 10000, "Invalid discount basis points");
-
-        discountBP = _discountBP;
-
-        emit DiscountUpdated(_discountBP);
-    }
-
-
-    /************************************************
-     *  TREASURY FUNCTIONS
-     ***********************************************/
-
-    /// @notice Withdraw all acquired funds back to the treasury
-    /// On purpose left unguarded, anyone should be able to call it.
-    function withdraw() external {
-        uint256 ethBalance = IWETH(WETH).balanceOf(address(this));
-        if (ethBalance != 0) {
-            IWETH(WETH).transfer(treasury, ethBalance);
-        }
-
-        uint256 usdcBalance = IERC20(USDC).balanceOf(address(this));
-        if (usdcBalance != 0) {
-            IERC20(USDC).transfer(treasury, usdcBalance);
-        }
-    }
-
-    /************************************************
-     *  USER FUNCTIONS
-     ***********************************************/
-
-    /// @notice Redeem tokens from the treasury in a discount to market price
-    /// @param amount The amount of USDC or WETH the user is willing to spend
-    /// @param isUSDC Whether the payment is in USDC or WETH
-    function redeem(uint256 amount, bool isUSDC) external requiresTrust {
-        // Determine token price
-        uint256 oraclePrice;
-        uint8 oracleDecimals = tokenOracleDecimals;
-        if (price == 0) {
-            oraclePrice = IPriceOracle(tokenOracle).latestAnswer();
-        } else {
-            oraclePrice = price;
-        }
-
-        // Apply discount if provided
-        if (discountBP != 0) {
-            uint256 discount = oraclePrice * discountBP / 10000;
-            oraclePrice -= discount;
-        }
-
-        // Exchange tokens for WETH or USDC
-        // Note that the user needs to approve this amount of USDC/WETH
-        // to spend before initiating the redeem.
-        if (isUSDC) {
-            // TODO: Make use of USDC price oracle
-            // https://data.chain.link/ethereum/mainnet/stablecoins/usdc-usd
-            uint8 stableDecimals = 6;
-            uint256 tokenAmount = amount * (10 ** oracleDecimals) / oraclePrice;
-            if (tokenDecimals > stableDecimals) {
-                tokenAmount *= (10 ** (tokenDecimals - stableDecimals));
-            } else if (tokenDecimals < stableDecimals) {
-                tokenAmount /= (10 ** (stableDecimals - tokenDecimals));
-            }
-            IERC20(USDC).transferFrom(msg.sender, address(this), amount);
-            IERC20(token).transfer(msg.sender, tokenAmount);
-        } else {
-            // TODO: Accept direct ETH payments
-            uint256 ethPrice = IPriceOracle(ethOracle).latestAnswer();
-            uint256 usdAmount = amount * ethPrice / (10 ** ethOracleDecimals);
-
-            uint8 ethDecimals = 18;
-            uint256 tokenAmount = usdAmount * (10 ** oracleDecimals) / oraclePrice;
-            if (tokenDecimals > ethDecimals) {
-                tokenAmount *= (10 ** (tokenDecimals - ethDecimals));
-            } else if (tokenDecimals < ethDecimals) {
-                tokenAmount /= (10 ** (ethDecimals - tokenDecimals));
-            }
-            IERC20(WETH).transferFrom(msg.sender, address(this), amount);
-            IERC20(token).transfer(msg.sender, tokenAmount);
-        }
-
+    function _readOracle(AggregatorV3Interface oracle) internal view returns (uint256) {
+        // roundId/answeredInRound checks are deprecated by Chainlink since
+        // OCR; staleness is enforced through updatedAt below.
+        // slither-disable-next-line unused-return
+        (, int256 answer,, uint256 updatedAt,) = oracle.latestRoundData();
+        if (answer <= 0) revert InvalidOraclePrice();
+        // Staleness bounds are hours, far beyond timestamp manipulation range.
+        // slither-disable-next-line timestamp
+        if (block.timestamp - updatedAt > maxOracleAge) revert StaleOraclePrice();
+        // casting to 'uint256' is safe because answer is checked positive above
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint256(answer);
     }
 }
